@@ -1,0 +1,192 @@
+version: '3.9'
+
+volumes:
+  certs0:
+  certs1:
+  certs2:
+  client:
+  db:
+    driver: local
+
+services:
+
+  roachcert:
+    container_name: roachcert
+    hostname: roachcert
+    build: roachcert
+    volumes:
+      - certs0:/certs/crdb0
+      - certs1:/certs/crdb1
+      - certs2:/certs/crdb2
+      - client:/certs/client
+
+  crdb0:
+    container_name: crdb0
+    hostname: crdb0
+    image: cockroachdb/cockroach:latest
+    command: start --cluster-name=test --logtostderr=WARNING --log-file-verbosity=WARNING --join=crdb0,crdb1,crdb2 --certs-dir=/certs --listen-addr=crdb0:26257 --advertise-addr=crdb0:26257 --http-addr=crdb0:8080
+    volumes:
+      - certs0:/certs
+    healthcheck:
+      test: ["CMD", "curl", "http://crdb0:8080/health?ready=1"]
+      interval: 2s
+      timeout: 1m
+      retries: 5
+      start_period: 10s
+
+  crdb1:
+    container_name: crdb1
+    hostname: crdb1
+    image: cockroachdb/cockroach:latest
+    command: start --cluster-name=test --logtostderr=WARNING --log-file-verbosity=WARNING --join=crdb0,crdb1,crdb2 --certs-dir=/certs --listen-addr=crdb1:26257 --advertise-addr=crdb1:26257 --http-addr=crdb1:8080
+    depends_on:
+      - crdb0
+    volumes:
+      - certs1:/certs
+    healthcheck:
+      test: ["CMD", "curl", "http://crdb1:8080/health?ready=1"]
+      interval: 2s
+      timeout: 1m
+      retries: 5
+      start_period: 10s
+
+  crdb2:
+    container_name: crdb2
+    hostname: crdb2
+    image: cockroachdb/cockroach:latest
+    command: start --cluster-name=test --logtostderr=WARNING --log-file-verbosity=WARNING --join=crdb0,crdb1,crdb2 --certs-dir=/certs --listen-addr=crdb2:26257 --advertise-addr=crdb2:26257 --http-addr=crdb2:8080
+    depends_on:
+      - crdb0
+      - crdb1
+    volumes:
+      - certs2:/certs
+    healthcheck:
+      test: ["CMD", "curl", "http://crdb2:8080/health?ready=1"]
+      interval: 2s
+      timeout: 1m
+      retries: 5
+      start_period: 10s
+
+
+  nginx:
+    container_name: nginx
+    hostname: nginx
+    build: ./nginx
+    ports:
+      - "8080:8080"
+      - "26257:26257"
+    depends_on:
+      - crdb0
+      - crdb1
+      - crdb2
+
+  init:
+    container_name: init
+    image: cockroachdb/cockroach:latest
+    command: init  --cluster-name=test --host=crdb0 --certs-dir=/certs
+    volumes:
+      - client:/certs
+    depends_on:
+      - crdb0
+      - crdb1
+      - crdb2
+      - nginx
+      - roachcert
+
+  client:
+    container_name: client
+    hostname: client
+    image: cockroachdb/cockroach:latest
+    command: |
+      sql --host=crdb0 --certs-dir=/certs --execute="CREATE DATABASE test;" --execute="CREATE USER IF NOT EXISTS buzz WITH PASSWORD 'admin';" --execute="GRANT ADMIN TO buzz;"
+    depends_on:
+      - crdb0
+      - crdb1
+      - crdb2
+      - nginx
+      - roachcert
+      - init
+    volumes:
+      - client:/certs
+
+  notebook:
+      image: jupyter/datascience-notebook
+      volumes:
+        - ${PWD}/jupyter:/home/jovyan/work
+        - ${PWD}/jupyter:/home/jovyan/work/datasets
+        - ${PWD}/jupyter:/home/jovyan/work/modules
+        - ${PWD}/jupyter:/etc/ssl/notebook
+        - client:/certs
+      ports:
+        - 10000:8888
+      environment:
+        JUPYTER_ENABLE_LAB: yes
+      container_name: jupyter_notebook
+      command: "start-notebook.sh"
+      depends_on:
+      - crdb0
+      - nginx
+
+  prometheus:
+    container_name: prometheus
+    hostname: prometheus
+    build: prometheus/.
+    entrypoint: ["prometheus", "--config.file=prometheus.yml"]
+    ports:
+      - "9090:9090"
+  
+  alertmanager:
+    container_name: alertmanager
+    hostname: alertmanager
+    build: alertmanager/.
+    entrypoint: ["alertmanager", "--config.file=alertmanager.yml"]
+    ports:
+      - "9093:9093"
+
+  grafana:
+    container_name: grafana
+    hostname: grafana
+    image: grafana/grafana:9.0.0-beta3
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: buzz
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SECURITY_ADMIN_EMAIL: admin@example.com
+    volumes:
+      - client:/certs
+  
+  jaeger:
+    container_name: jeager
+    hostname: jeager
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "16686:16686"
+      - "14268"
+      - "14250"
+
+  otel:
+    image: otel/opentelemetry-collector-contrib-dev:latest
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel/otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "1888:1888"   # pprof extension
+      - "8888:8888"   # Prometheus metrics exposed by the collector
+      - "8889:8889"   # Prometheus exporter metrics
+      - "13133:13133" # health_check extension
+      - "4317"        # OTLP gRPC receiver
+      - "55670:55679" # zpages extension
+    depends_on:
+      - jaeger
+
+  postgres:
+    image: postgres:14.3-alpine
+    restart: always
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    ports:
+      - '5432:5432'
+    volumes: 
+      - db:/var/lib/postgresql/data

@@ -1,0 +1,5 @@
+cockroach-data
+*.crt
+*.key
+*.pk8
+schema.hcl

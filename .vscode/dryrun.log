@@ -1,0 +1,6 @@
+make --dry-run --always-make --keep-going --print-directory
+make: Entering directory `/Users/josh/projects/chore'
+docker compose build --no-cache
+docker compose up -d
+make: Leaving directory `/Users/josh/projects/chore'
+ 

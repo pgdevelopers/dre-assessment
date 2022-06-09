@@ -1,0 +1,1 @@
+SELECT * FROM vehicles WHERE city = 'san francisco' AND ext->> 'color' = 'green' AND status = 'available';

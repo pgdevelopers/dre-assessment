@@ -1,0 +1,21 @@
+{
+  "sqltools.connections": [
+    {
+      "pgOptions": {
+        "ssl": {
+          "ca": "/Users/josh/projects/chore/ca.crt",
+          "key": "/Users/josh/projects/chore/client.root.key",
+          "cert": "/Users/josh/projects/chore/client.root.crt",
+          "pfx": ""
+        }
+      },
+      "previewLimit": 50,
+      "server": "localhost",
+      "port": 26257,
+      "askForPassword": true,
+      "driver": "PostgreSQL",
+      "connectString": "postgres://root@localhost:26257/movr",
+      "name": "crdb"
+    }
+  ]
+}
